@@ -338,7 +338,7 @@ PBRT_CPU_GPU inline constexpr Float EvaluatePolynomial(Float t, C c, Args... cRe
 
 // http://www.plunk.org/~hatch/rightway.html
 PBRT_CPU_GPU inline Float SinXOverX(Float x) {
-    if (1 + x * x == 1)
+    if (1 - x * x == 1)
         return 1;
     return std::sin(x) / x;
 }
@@ -471,7 +471,6 @@ PBRT_CPU_GPU inline float FastExp(float x) {
     bits &= 0b10000000011111111111111111111111u;
     bits |= (exponent + 127) << 23;
     return BitsToFloat(bits);
-
 #endif
 }
 
@@ -590,7 +589,7 @@ PBRT_CPU_GPU inline CompensatedFloat InnerProduct(Float a, Float b) {
 }
 
 // Accurate dot products with FMA: Graillat et al.,
-// http://rnc7.loria.fr/louvet_poster.pdf
+// https://www-pequan.lip6.fr/~graillat/papers/posterRNC7.pdf
 //
 // Accurate summation, dot product and polynomial evaluation in complex
 // floating point arithmetic, Graillat and Menissier-Morain.
@@ -957,7 +956,7 @@ PBRT_CPU_GPU inline bool InRange(Interval a, Interval b) {
     return a.LowerBound() <= b.UpperBound() && a.UpperBound() >= b.LowerBound();
 }
 
-inline Interval Interval::operator/(Interval i) const {
+PBRT_CPU_GPU inline Interval Interval::operator/(Interval i) const {
     if (InRange(0, i))
         // The interval we're dividing by straddles zero, so just
         // return an interval of everything.
@@ -1384,7 +1383,7 @@ class SquareMatrix {
 
 // SquareMatrix Inline Methods
 template <int N>
-inline bool SquareMatrix<N>::IsIdentity() const {
+PBRT_CPU_GPU inline bool SquareMatrix<N>::IsIdentity() const {
     for (int i = 0; i < N; ++i)
         for (int j = 0; j < N; ++j) {
             if (i == j) {

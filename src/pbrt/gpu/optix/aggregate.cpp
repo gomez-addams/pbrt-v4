@@ -2,9 +2,9 @@
 // The pbrt source code is licensed under the Apache License, Version 2.0.
 // SPDX: Apache-2.0
 
-#include <pbrt/gpu/aggregate.h>
+#include <pbrt/gpu/optix/aggregate.h>
 
-#include <pbrt/gpu/optix.h>
+#include <pbrt/gpu/optix/optix.h>
 #include <pbrt/gpu/util.h>
 #include <pbrt/lights.h>
 #include <pbrt/materials.h>
@@ -268,7 +268,7 @@ std::map<int, TriQuadMesh> OptiXAggregate::PreparePLYMeshes(
             plyMesh.ConvertToOnlyTriangles();
 
             Float edgeLength =
-                shape.parameters.GetOneFloat("displacement.edgelength", 1.f);
+                shape.parameters.GetOneFloat("edgelength", 1.f);
             edgeLength *= Options->displacementEdgeScale;
 
             std::string displacementTexName = shape.parameters.GetTexture("displacement");
@@ -451,15 +451,40 @@ OptiXAggregate::BVH OptiXAggregate::buildBVHForTriangles(
             input.type = OPTIX_BUILD_INPUT_TYPE_TRIANGLES;
 
             input.triangleArray.vertexFormat = OPTIX_VERTEX_FORMAT_FLOAT3;
-            input.triangleArray.vertexStrideInBytes = sizeof(Point3f);
             input.triangleArray.numVertices = mesh->nVertices;
-            pDeviceDevicePtrs[meshIndex] = CUdeviceptr(mesh->p);
+#ifdef PBRT_FLOAT_AS_DOUBLE
+            // Convert the vertex positions to 32-bit floats before giving
+            // them to OptiX, since it doesn't support double-precision
+            // geometry.
+            input.triangleArray.vertexStrideInBytes = 3 * sizeof(float);
+            float *pGPU;
+            std::vector<float> p32(3 * mesh->nVertices);
+            for (int i = 0; i < mesh->nVertices; i++) {
+                p32[3*i] = mesh->p[i].x;
+                p32[3*i+1] = mesh->p[i].y;
+                p32[3*i+2] = mesh->p[i].z;
+            }
+            CUDA_CHECK(cudaMalloc(&pGPU, mesh->nVertices * 3 * sizeof(float)));
+            CUDA_CHECK(cudaMemcpy(pGPU, p32.data(), mesh->nVertices * 3 *  sizeof(float),
+                                  cudaMemcpyHostToDevice));
+#else
+            input.triangleArray.vertexStrideInBytes = sizeof(Point3f);
+            Point3f *pGPU;
+            CUDA_CHECK(cudaMalloc(&pGPU, mesh->nVertices * sizeof(Point3f)));
+            CUDA_CHECK(cudaMemcpy(pGPU, mesh->p, mesh->nVertices * sizeof(Point3f),
+                                  cudaMemcpyHostToDevice));
+#endif
+            pDeviceDevicePtrs[meshIndex] = CUdeviceptr(pGPU);
             input.triangleArray.vertexBuffers = &pDeviceDevicePtrs[meshIndex];
 
             input.triangleArray.indexFormat = OPTIX_INDICES_FORMAT_UNSIGNED_INT3;
             input.triangleArray.indexStrideInBytes = 3 * sizeof(int);
             input.triangleArray.numIndexTriplets = mesh->nTriangles;
-            input.triangleArray.indexBuffer = CUdeviceptr(mesh->vertexIndices);
+            int *indicesGPU;
+            CUDA_CHECK(cudaMalloc(&indicesGPU, mesh->nTriangles * 3 * sizeof(int)));
+            CUDA_CHECK(cudaMemcpy(indicesGPU, mesh->vertexIndices, mesh->nTriangles * 3 * sizeof(int),
+                                  cudaMemcpyHostToDevice));
+            input.triangleArray.indexBuffer = CUdeviceptr(indicesGPU);
 
             FloatTexture alphaTexture = getAlphaTexture(shape, floatTextures, alloc);
             Material material = getMaterial(shape, namedMaterials, materials);
@@ -1028,8 +1053,11 @@ OptixPipelineCompileOptions OptiXAggregate::getPipelineCompileOptions() {
     pipelineCompileOptions.numAttributeValues = 4;
     // OPTIX_EXCEPTION_FLAG_NONE;
     pipelineCompileOptions.exceptionFlags =
-        (OPTIX_EXCEPTION_FLAG_STACK_OVERFLOW | OPTIX_EXCEPTION_FLAG_TRACE_DEPTH |
-         OPTIX_EXCEPTION_FLAG_DEBUG);
+        (OPTIX_EXCEPTION_FLAG_STACK_OVERFLOW | OPTIX_EXCEPTION_FLAG_TRACE_DEPTH);
+#if (OPTIX_VERSION < 80000)
+    // This flag is removed since OptiX 8.0.0
+    pipelineCompileOptions.exceptionFlags |= OPTIX_EXCEPTION_FLAG_DEBUG;
+#endif
     pipelineCompileOptions.pipelineLaunchParamsVariableName = "params";
 
     return pipelineCompileOptions;
@@ -1061,10 +1089,21 @@ OptixModule OptiXAggregate::createOptiXModule(OptixDeviceContext optixContext,
     char log[4096];
     size_t logSize = sizeof(log);
     OptixModule optixModule;
-    OPTIX_CHECK_WITH_LOG(optixModuleCreateFromPTX(
-                             optixContext, &moduleCompileOptions, &pipelineCompileOptions,
-                             ptx, strlen(ptx), log, &logSize, &optixModule),
-                         log);
+
+#if (OPTIX_VERSION >= 70700)
+#define OPTIX_MODULE_CREATE_FN optixModuleCreate
+#else
+#define OPTIX_MODULE_CREATE_FN optixModuleCreateFromPTX
+#endif
+
+    OPTIX_CHECK_WITH_LOG(
+        OPTIX_MODULE_CREATE_FN(
+            optixContext, &moduleCompileOptions, &pipelineCompileOptions,
+            ptx, strlen(ptx), log, &logSize, &optixModule
+        ),
+        log
+    );
+
     LOG_VERBOSE("%s", log);
 
     return optixModule;
@@ -1253,11 +1292,13 @@ OptiXAggregate::OptiXAggregate(
 
     OptixPipelineLinkOptions pipelineLinkOptions = {};
     pipelineLinkOptions.maxTraceDepth = 2;
+#if (OPTIX_VERSION < 70700)
 #ifndef NDEBUG
     pipelineLinkOptions.debugLevel = OPTIX_COMPILE_DEBUG_LEVEL_FULL;
 #else
     pipelineLinkOptions.debugLevel = OPTIX_COMPILE_DEBUG_LEVEL_NONE;
 #endif
+#endif // OPTIX_VERSION
 
     OPTIX_CHECK_WITH_LOG(
         optixPipelineCreate(optixContext, &pipelineCompileOptions, &pipelineLinkOptions,

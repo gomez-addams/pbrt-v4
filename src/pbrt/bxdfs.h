@@ -477,7 +477,7 @@ class LayeredBxDF {
     SampledSpectrum f(Vector3f wo, Vector3f wi, TransportMode mode) const {
         SampledSpectrum f(0.);
         // Estimate _LayeredBxDF_ value _f_ using random sampling
-        // Set _wi_ and _wi_ for layered BSDF evaluation
+        // Set _wo_ and _wi_ for layered BSDF evaluation
         if (twoSided && wo.z < 0) {
             wo = -wo;
             wi = -wi;
@@ -539,7 +539,7 @@ class LayeredBxDF {
                 PBRT_DBG("beta: %f %f %f %f, w: %f %f %f, f: %f %f %f %f\n", beta[0],
                          beta[1], beta[2], beta[3], w.x, w.y, w.z, f[0], f[1], f[2],
                          f[3]);
-                // Possibly terminate layered BSDF random walk with Russian Roulette
+                // Possibly terminate layered BSDF random walk with Russian roulette
                 if (depth > 3 && beta.MaxComponentValue() < 0.25f) {
                     Float q = std::max<Float>(0, 1 - beta.MaxComponentValue());
                     if (r() < q)
@@ -778,7 +778,7 @@ class LayeredBxDF {
     Float PDF(Vector3f wo, Vector3f wi, TransportMode mode,
               BxDFReflTransFlags sampleFlags = BxDFReflTransFlags::All) const {
         CHECK(sampleFlags == BxDFReflTransFlags::All);  // for now
-        // Set _wi_ and _wi_ for layered BSDF evaluation
+        // Set _wo_ and _wi_ for layered BSDF evaluation
         if (twoSided && wo.z < 0) {
             wo = -wo;
             wi = -wi;
@@ -1131,12 +1131,12 @@ class NormalizedFresnelBxDF {
     Float eta;
 };
 
-inline SampledSpectrum BxDF::f(Vector3f wo, Vector3f wi, TransportMode mode) const {
+PBRT_CPU_GPU inline SampledSpectrum BxDF::f(Vector3f wo, Vector3f wi, TransportMode mode) const {
     auto f = [&](auto ptr) -> SampledSpectrum { return ptr->f(wo, wi, mode); };
     return Dispatch(f);
 }
 
-inline pstd::optional<BSDFSample> BxDF::Sample_f(Vector3f wo, Float uc, Point2f u,
+PBRT_CPU_GPU inline pstd::optional<BSDFSample> BxDF::Sample_f(Vector3f wo, Float uc, Point2f u,
                                                  TransportMode mode,
                                                  BxDFReflTransFlags sampleFlags) const {
     auto sample_f = [&](auto ptr) -> pstd::optional<BSDFSample> {
@@ -1145,18 +1145,18 @@ inline pstd::optional<BSDFSample> BxDF::Sample_f(Vector3f wo, Float uc, Point2f 
     return Dispatch(sample_f);
 }
 
-inline Float BxDF::PDF(Vector3f wo, Vector3f wi, TransportMode mode,
+PBRT_CPU_GPU inline Float BxDF::PDF(Vector3f wo, Vector3f wi, TransportMode mode,
                        BxDFReflTransFlags sampleFlags) const {
     auto pdf = [&](auto ptr) { return ptr->PDF(wo, wi, mode, sampleFlags); };
     return Dispatch(pdf);
 }
 
-inline BxDFFlags BxDF::Flags() const {
+PBRT_CPU_GPU inline BxDFFlags BxDF::Flags() const {
     auto flags = [&](auto ptr) { return ptr->Flags(); };
     return Dispatch(flags);
 }
 
-inline void BxDF::Regularize() {
+PBRT_CPU_GPU inline void BxDF::Regularize() {
     auto regularize = [&](auto ptr) { ptr->Regularize(); };
     return Dispatch(regularize);
 }

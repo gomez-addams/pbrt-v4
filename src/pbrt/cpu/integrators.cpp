@@ -272,19 +272,17 @@ void RayIntegrator::EvaluatePixelSample(Point2i pPixel, int sampleIndex, Sampler
             L = SampledSpectrum(0.f);
         }
 
-        if (cameraRay)
-            PBRT_DBG(
-                "%s\n",
-                StringPrintf("Camera sample: %s -> ray %s -> L = %s, visibleSurface %s",
-                             cameraSample, cameraRay->ray, L,
-                             (visibleSurface ? visibleSurface.ToString() : "(none)"))
-                    .c_str());
-        else
-            PBRT_DBG("%s\n",
-                     StringPrintf("Camera sample: %s -> no ray generated", cameraSample)
-                         .c_str());
+        PBRT_DBG(
+            "%s\n",
+            StringPrintf("Camera sample: %s -> ray %s -> L = %s, visibleSurface %s",
+                         cameraSample, cameraRay->ray, L,
+                         (visibleSurface ? visibleSurface.ToString() : "(none)"))
+                .c_str());
+    } else {
+	    PBRT_DBG("%s\n",
+	             StringPrintf("Camera sample: %s -> no ray generated", cameraSample)
+			             .c_str());
     }
-
     // Add camera ray's contribution to image
     camera.GetFilm().AddSample(pPixel, L, lambda, &visibleSurface,
                                cameraSample.filterWeight);
@@ -521,7 +519,7 @@ void LightPathIntegrator::EvaluatePixelSample(Point2i pPixel, int sampleIndex,
     if (!sampledLight)
         return;
     Light light = sampledLight->light;
-    Float lightPDF = sampledLight->p;
+    Float p_l = sampledLight->p;
 
     // Sample point on light source for light path
     Float time = camera.SampleTime(sampler.Get1D());
@@ -544,7 +542,7 @@ void LightPathIntegrator::EvaluatePixelSample(Point2i pPixel, int sampleIndex,
                     // Compute visible light's path contribution and add to film
                     SampledSpectrum L = Le *
                                         DistanceSquared(cs->pRef.p(), cs->pLens.p()) *
-                                        cs->Wi / (lightPDF * pdf * cs->pdf);
+                                        cs->Wi / (p_l * pdf * cs->pdf);
                     camera.GetFilm().AddSplat(cs->pRaster, L, lambda);
                 }
             }
@@ -556,7 +554,7 @@ void LightPathIntegrator::EvaluatePixelSample(Point2i pPixel, int sampleIndex,
     // Initialize light path ray and weighted path throughput _beta_
     RayDifferential ray(les->ray);
     SampledSpectrum beta =
-        les->L * les->AbsCosTheta(ray.d) / (lightPDF * les->pdfPos * les->pdfDir);
+        les->L * les->AbsCosTheta(ray.d) / (p_l * les->pdfPos * les->pdfDir);
 
     while (true) {
         // Intersect light path ray with scene
@@ -634,7 +632,7 @@ SampledSpectrum PathIntegrator::Li(RayDifferential ray, SampledWavelengths &lamb
     SampledSpectrum L(0.f), beta(1.f);
     int depth = 0;
 
-    Float bsdfPDF, etaScale = 1;
+    Float p_b, etaScale = 1;
     bool specularBounce = false, anyNonSpecularBounces = false;
     LightSampleContext prevIntrCtx;
 
@@ -651,9 +649,9 @@ SampledSpectrum PathIntegrator::Li(RayDifferential ray, SampledWavelengths &lamb
                     L += beta * Le;
                 else {
                     // Compute MIS weight for infinite light
-                    Float lightPDF = lightSampler.PMF(prevIntrCtx, light) *
-                                     light.PDF_Li(prevIntrCtx, ray.d, true);
-                    Float w_b = PowerHeuristic(1, bsdfPDF, 1, lightPDF);
+                    Float p_l = lightSampler.PMF(prevIntrCtx, light) *
+                                light.PDF_Li(prevIntrCtx, ray.d, true);
+                    Float w_b = PowerHeuristic(1, p_b, 1, p_l);
 
                     L += beta * w_b * Le;
                 }
@@ -669,9 +667,9 @@ SampledSpectrum PathIntegrator::Li(RayDifferential ray, SampledWavelengths &lamb
             else {
                 // Compute MIS weight for area light
                 Light areaLight(si->intr.areaLight);
-                Float lightPDF = lightSampler.PMF(prevIntrCtx, areaLight) *
-                                 areaLight.PDF_Li(prevIntrCtx, ray.d, true);
-                Float w_l = PowerHeuristic(1, bsdfPDF, 1, lightPDF);
+                Float p_l = lightSampler.PMF(prevIntrCtx, areaLight) *
+                            areaLight.PDF_Li(prevIntrCtx, ray.d, true);
+                Float w_l = PowerHeuristic(1, p_b, 1, p_l);
 
                 L += beta * w_l * Le;
             }
@@ -739,7 +737,7 @@ SampledSpectrum PathIntegrator::Li(RayDifferential ray, SampledWavelengths &lamb
             break;
         // Update path state variables after surface scattering
         beta *= bs->f * AbsDot(bs->wi, isect.shading.n) / bs->pdf;
-        bsdfPDF = bs->pdfIsProportional ? bsdf.PDF(wo, bs->wi) : bs->pdf;
+        p_b = bs->pdfIsProportional ? bsdf.PDF(wo, bs->wi) : bs->pdf;
         DCHECK(!IsInf(beta.y(lambda)));
         specularBounce = bs->IsSpecular();
         anyNonSpecularBounces |= !bs->IsSpecular();
@@ -899,7 +897,7 @@ SampledSpectrum SimpleVolPathIntegrator::Li(RayDifferential ray,
                                 return false;
 
                             } else {
-                                // Handle null scattering event for medium sample
+                                // Handle null-scattering event for medium sample
                                 uMode = rng.Uniform<Float>();
                                 return true;
                             }
@@ -1024,18 +1022,18 @@ SampledSpectrum VolPathIntegrator::Li(RayDifferential ray, SampledWavelengths &l
                             return false;
                         }
 
-                        // Update _beta_ and _r_u_ for real scattering event
+                        // Update _beta_ and _r_u_ for real-scattering event
                         Float pdf = T_maj[0] * mp.sigma_s[0];
                         beta *= T_maj * mp.sigma_s / pdf;
                         r_u *= T_maj * mp.sigma_s / pdf;
 
                         if (beta && r_u) {
-                            // Sample direct lighting at volume scattering event
+                            // Sample direct lighting at volume-scattering event
                             MediumInteraction intr(p, -ray.d, ray.time, ray.medium,
                                                    mp.phase);
                             L += SampleLd(intr, nullptr, lambda, sampler, beta, r_u);
 
-                            // Sample new direction at real scattering event
+                            // Sample new direction at real-scattering event
                             Point2f u = sampler.Get2D();
                             pstd::optional<PhaseFunctionSample> ps =
                                 intr.phase.Sample_p(-ray.d, u);
@@ -1088,9 +1086,9 @@ SampledSpectrum VolPathIntegrator::Li(RayDifferential ray, SampledWavelengths &l
                         L += beta * Le / r_u.Average();
                     else {
                         // Add infinite light contribution using both PDFs with MIS
-                        Float lightPDF = lightSampler.PMF(prevIntrContext, light) *
-                                         light.PDF_Li(prevIntrContext, ray.d, true);
-                        r_l *= lightPDF;
+                        Float p_l = lightSampler.PMF(prevIntrContext, light) *
+                                    light.PDF_Li(prevIntrContext, ray.d, true);
+                        r_l *= p_l;
                         L += beta * Le / (r_u + r_l).Average();
                     }
                 }
@@ -1106,9 +1104,9 @@ SampledSpectrum VolPathIntegrator::Li(RayDifferential ray, SampledWavelengths &l
             else {
                 // Add surface light contribution using both PDFs with MIS
                 Light areaLight(isect.areaLight);
-                Float lightPDF = lightSampler.PMF(prevIntrContext, areaLight) *
-                                 areaLight.PDF_Li(prevIntrContext, ray.d, true);
-                r_l *= lightPDF;
+                Float p_l = lightSampler.PMF(prevIntrContext, areaLight) *
+                            areaLight.PDF_Li(prevIntrContext, ray.d, true);
+                r_l *= p_l;
                 L += beta * Le / (r_u + r_l).Average();
             }
         }
@@ -1304,7 +1302,7 @@ SampledSpectrum VolPathIntegrator::SampleLd(const Interaction &intr, const BSDF 
     pstd::optional<LightLiSample> ls = light.SampleLi(ctx, uLight, lambda, true);
     if (!ls || !ls->L || ls->pdf == 0)
         return SampledSpectrum(0.f);
-    Float lightPDF = sampledLight->p * ls->pdf;
+    Float p_l = sampledLight->p * ls->pdf;
 
     // Evaluate BSDF or phase function for light sample direction
     Float scatterPDF;
@@ -1383,7 +1381,7 @@ SampledSpectrum VolPathIntegrator::SampleLd(const Interaction &intr, const BSDF 
         lightRay = si->intr.SpawnRayTo(ls->pLight);
     }
     // Return path contribution function estimate for direct lighting
-    r_l *= r_p * lightPDF;
+    r_l *= r_p * p_l;
     r_u *= r_p * scatterPDF;
     if (IsDeltaLight(light.Type()))
         return beta * f_hat * T_ray * ls->L / r_l.Average();
@@ -1420,8 +1418,6 @@ AOIntegrator::AOIntegrator(bool cosSample, Float maxDist, Camera camera, Sampler
 SampledSpectrum AOIntegrator::Li(RayDifferential ray, SampledWavelengths &lambda,
                                  Sampler sampler, ScratchBuffer &scratchBuffer,
                                  VisibleSurface *visibleSurface) const {
-    SampledSpectrum L(0.f);
-
     // Intersect _ray_ with scene and store intersection in _isect_
     pstd::optional<ShapeIntersection> si;
 retry:
@@ -1458,7 +1454,7 @@ retry:
         Ray r = isect.SpawnRay(wi);
         if (!IntersectP(r, maxDist)) {
             return illumScale * illuminant.Sample(lambda) *
-                   SampledSpectrum(Dot(wi, n) / (Pi * pdf));
+                   Dot(wi, n) / (Pi * pdf);
         }
     }
     return SampledSpectrum(0.);
@@ -1934,12 +1930,12 @@ int GenerateLightSubpath(const Integrator &integrator, SampledWavelengths &lambd
     RayDifferential ray(les->ray);
 
     // Generate first vertex of light subpath
-    Float lightPDF = lightSamplePDF * les->pdfPos;
-    path[0] = les->intr ? Vertex::CreateLight(light, *les->intr, les->L, lightPDF)
-                        : Vertex::CreateLight(light, ray, les->L, lightPDF);
+    Float p_l = lightSamplePDF * les->pdfPos;
+    path[0] = les->intr ? Vertex::CreateLight(light, *les->intr, les->L, p_l)
+                        : Vertex::CreateLight(light, ray, les->L, p_l);
 
     // Follow light subpath random walk
-    SampledSpectrum beta = les->L * les->AbsCosTheta(ray.d) / (lightPDF * les->pdfDir);
+    SampledSpectrum beta = les->L * les->AbsCosTheta(ray.d) / (p_l * les->pdfDir);
     PBRT_DBG("%s\n",
              StringPrintf(
                  "Starting light subpath. Ray: %s, Le %s, beta %s, pdfPos %f, pdfDir %f",
@@ -2130,7 +2126,7 @@ SampledSpectrum G(const Integrator &integrator, Sampler sampler, const Vertex &v
     return g * integrator.Tr(v0.GetInteraction(), v1.GetInteraction(), lambda);
 }
 
-Float MISWeight(const Integrator &integrator, Vertex *lightVertices,
+Float MISWeight(const Integrator &integrator, Camera camera, Vertex *lightVertices,
                 Vertex *cameraVertices, Vertex &sampled, int s, int t,
                 LightSampler lightSampler) {
     if (s + t == 2)
@@ -2181,10 +2177,16 @@ Float MISWeight(const Integrator &integrator, Vertex *lightVertices,
     if (qsMinus)
         a7 = {&qsMinus->pdfRev, qs->PDF(integrator, pt, *qsMinus)};
 
+    Film film = camera.GetFilm();
+    Float splatScale = Float(film.FullResolution().x) * Float(film.FullResolution().y) /
+        Float(film.PixelBounds().Area());
+
     // Consider hypothetical connection strategies along the camera subpath
     Float ri = 1;
     for (int i = t - 1; i > 0; --i) {
         ri *= remap0(cameraVertices[i].pdfRev) / remap0(cameraVertices[i].pdfFwd);
+        // See https://github.com/mmp/pbrt-v4/issues/347
+        if (i == 1) ri /= splatScale;
         if (!cameraVertices[i].delta && !cameraVertices[i - 1].delta)
             sumRi += ri;
     }
@@ -2199,6 +2201,8 @@ Float MISWeight(const Integrator &integrator, Vertex *lightVertices,
             sumRi += ri;
     }
 
+    // See https://github.com/mmp/pbrt-v4/issues/347
+    if (t == 1) sumRi /= splatScale;
     return 1 / (1 + sumRi);
 }
 
@@ -2279,14 +2283,31 @@ SampledSpectrum BDPTIntegrator::Li(RayDifferential ray, SampledWavelengths &lamb
                      StringPrintf("Connect bdpt s: %d, t: %d, Lpath: %s, misWeight: %f\n",
                                   s, t, Lpath, misWeight)
                          .c_str());
-            if (pFilmNew && (visualizeStrategies || visualizeWeights)) {
+            if (Lpath && (visualizeStrategies || visualizeWeights)) {
                 SampledSpectrum value;
                 if (visualizeStrategies)
                     value = misWeight == 0 ? SampledSpectrum(0.) : Lpath / misWeight;
                 if (visualizeWeights)
                     value = Lpath;
-                CHECK(pFilmNew.has_value());
-                weightFilms[BufferIndex(s, t)].AddSplat(*pFilmNew, value, lambda);
+                if (pFilmNew)
+                    weightFilms[BufferIndex(s, t)].AddSplat(*pFilmNew, value, lambda);
+                else {
+                    // Unfortunately we no longer have the pixel
+                    // coordinates of the sample easily available, so we
+                    // need to go back to the camera and ask for them; here
+                    // we take a point a little bit along the camera ray
+                    // and ask the camera to reproject that for us.
+                    //
+                    // Double unfortunately, this doesn't quite work for
+                    // scenes where the camera has a finite aperture, since
+                    // we don't have the CameraSample either so just have
+                    // to pass (0.5,0.5) in for the lens sample...
+                    pstd::optional<CameraWiSample> cs =
+                        camera.SampleWi(Interaction(ray(100.f), nullptr), Point2f(0.5f, 0.5f), lambda);
+                    CHECK_RARE(1e-3, !cs);
+                    if (cs)
+                        weightFilms[BufferIndex(s, t)].AddSplat(cs->pRaster, value, lambda);
+                }
             }
             if (t != 1)
                 L += Lpath;
@@ -2332,8 +2353,14 @@ SampledSpectrum ConnectBDPT(const Integrator &integrator, SampledWavelengths &la
                 if (qs.IsOnSurface())
                     L *= AbsDot(cs->wi, qs.ns());
                 DCHECK(!L.HasNaNs());
-                if (L)
+                if (L) {
                     L *= integrator.Tr(cs->pRef, cs->pLens, lambda);
+
+                    // See https://github.com/mmp/pbrt-v4/issues/347
+                    Film film = camera.GetFilm();
+                    L *= Float(film.FullResolution().x) * Float(film.FullResolution().y) /
+                        Float(film.PixelBounds().Area());
+                }
             }
         }
 
@@ -2346,7 +2373,7 @@ SampledSpectrum ConnectBDPT(const Integrator &integrator, SampledWavelengths &la
 
             if (sampledLight) {
                 Light light = sampledLight->light;
-                Float lightPDF = sampledLight->p;
+                Float p_l = sampledLight->p;
 
                 LightSampleContext ctx;
                 if (pt.IsOnSurface()) {
@@ -2366,7 +2393,7 @@ SampledSpectrum ConnectBDPT(const Integrator &integrator, SampledWavelengths &la
                 if (lightWeight && lightWeight->L && lightWeight->pdf > 0) {
                     EndpointInteraction ei(light, lightWeight->pLight);
                     sampled = Vertex::CreateLight(
-                        ei, lightWeight->L / (lightWeight->pdf * lightPDF), 0);
+                        ei, lightWeight->L / (lightWeight->pdf * p_l), 0);
                     sampled.pdfFwd = sampled.PDFLightOrigin(integrator.infiniteLights, pt,
                                                             lightSampler);
                     L = pt.beta * pt.f(sampled, TransportMode::Radiance) * sampled.beta;
@@ -2405,7 +2432,7 @@ SampledSpectrum ConnectBDPT(const Integrator &integrator, SampledWavelengths &la
         ++zeroRadiancePaths;
     pathLength << s + t - 2;
     // Compute MIS weight for connection strategy
-    Float misWeight = L ? MISWeight(integrator, lightVertices, cameraVertices, sampled, s,
+    Float misWeight = L ? MISWeight(integrator, camera, lightVertices, cameraVertices, sampled, s,
                                     t, lightSampler)
                         : 0.f;
     PBRT_DBG("MIS weight for (s,t) = (%d, %d) connection: %f\n", s, t, misWeight);
@@ -2840,6 +2867,8 @@ void SPPMIntegrator::Render() {
             Options->disableWavelengthJitter ? Float(0.5) : RadicalInverse(1, iter);
         const SampledWavelengths passLambda = film.SampleWavelengths(uLambda);
 
+        Float timeSample = RadicalInverse(2, iter);
+
         ParallelFor2D(pixelBounds, [&](Bounds2i tileBounds) {
             // Follow camera paths for _tileBounds_ in image for SPPM
             ScratchBuffer &scratchBuffer = threadScratchBuffers.Get();
@@ -2849,6 +2878,7 @@ void SPPMIntegrator::Render() {
                 // Generate camera ray for pixel for SPPM
                 SampledWavelengths lambda = passLambda;
                 CameraSample cs = GetCameraSample(sampler, pPixel, film.GetFilter());
+                cs.time = timeSample;
                 pstd::optional<CameraRayDifferential> crd =
                     camera.GenerateRayDifferential(cs, lambda);
                 if (!crd || !crd->weight)
@@ -2860,7 +2890,7 @@ void SPPMIntegrator::Render() {
 
                 // Follow camera ray path until a visible point is created
                 SPPMPixel &pixel = pixels[pPixel];
-                Float etaScale = 1, bsdfPDF;
+                Float etaScale = 1, p_b;
                 bool specularBounce = true, haveSetVisiblePoint = false;
                 LightSampleContext prevIntrCtx;
                 int depth = 0;
@@ -2877,9 +2907,9 @@ void SPPMIntegrator::Render() {
                                 L += beta * Le;
                             else {
                                 // Compute MIS weight for infinite light
-                                Float lightPDF = lightSampler.PMF(prevIntrCtx, light) *
-                                                 light.PDF_Li(prevIntrCtx, ray.d, true);
-                                Float w_b = PowerHeuristic(1, bsdfPDF, 1, lightPDF);
+                                Float p_l = lightSampler.PMF(prevIntrCtx, light) *
+                                            light.PDF_Li(prevIntrCtx, ray.d, true);
+                                Float w_b = PowerHeuristic(1, p_b, 1, p_l);
 
                                 L += beta * w_b * Le;
                             }
@@ -2911,9 +2941,9 @@ void SPPMIntegrator::Render() {
                         else {
                             // Compute MIS weight for area light
                             Light areaLight(si->intr.areaLight);
-                            Float lightPDF = lightSampler.PMF(prevIntrCtx, areaLight) *
-                                             areaLight.PDF_Li(prevIntrCtx, ray.d, true);
-                            Float w_l = PowerHeuristic(1, bsdfPDF, 1, lightPDF);
+                            Float p_l = lightSampler.PMF(prevIntrCtx, areaLight) *
+                                        areaLight.PDF_Li(prevIntrCtx, ray.d, true);
+                            Float w_l = PowerHeuristic(1, p_b, 1, p_l);
 
                             L += beta * w_l * Le;
                         }
@@ -2949,7 +2979,7 @@ void SPPMIntegrator::Render() {
                         etaScale *= Sqr(bs->eta);
 
                     beta *= bs->f * AbsDot(bs->wi, isect.shading.n) / bs->pdf;
-                    bsdfPDF = bs->pdfIsProportional ? bsdf.PDF(wo, bs->wi) : bs->pdf;
+                    p_b = bs->pdfIsProportional ? bsdf.PDF(wo, bs->wi) : bs->pdf;
 
                     SampledSpectrum rrBeta = beta * etaScale;
                     if (rrBeta.MaxComponentValue() < 1) {
@@ -3062,12 +3092,12 @@ void SPPMIntegrator::Render() {
                 if (!sampledLight)
                     continue;
                 Light light = sampledLight->light;
-                Float lightPDF = sampledLight->p;
+                Float p_l = sampledLight->p;
 
                 // Compute sample values for photon ray leaving light source
                 Point2f uLight0 = Sample2D();
                 Point2f uLight1 = Sample2D();
-                Float uLightTime = camera.SampleTime(Sample1D());
+                Float uLightTime = camera.SampleTime(timeSample);
 
                 // Generate _photonRay_ from light source and initialize _beta_
                 SampledWavelengths lambda = passLambda;
@@ -3077,7 +3107,7 @@ void SPPMIntegrator::Render() {
                     continue;
                 RayDifferential photonRay = RayDifferential(les->ray);
                 SampledSpectrum beta = (les->AbsCosTheta(photonRay.d) * les->L) /
-                                       (lightPDF * les->pdfPos * les->pdfDir);
+                                       (p_l * les->pdfPos * les->pdfDir);
                 if (!beta)
                     continue;
 
