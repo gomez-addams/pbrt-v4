@@ -7,8 +7,12 @@ project (PBRT-V4 LANGUAGES CXX C)
 set (CMAKE_CXX_STANDARD 17)
 set (CMAKE_CXX_STANDARD_REQUIRED ON)
 
+if (NOT DEFINED PBRT_SOURCE_CODE)
+  set (PBRT_SOURCE_CODE ${CMAKE_SOURCE_DIR})
+endif ()
+
 # For sanitizers
-list (INSERT CMAKE_MODULE_PATH 0 "${CMAKE_SOURCE_DIR}/cmake")
+list (INSERT CMAKE_MODULE_PATH 0 "${PBRT_SOURCE_CODE}/cmake")
 
 # Configuration options
 
@@ -20,6 +24,8 @@ option (PBRT_NVML "Use NVML for GPU performance measurement" OFF)
 option (PBRT_USE_PREGENERATED_RGB_TO_SPECTRUM_TABLES "Use pregenerated rgbspectrum_*.cpp files rather than running rgb2spec_opt to generate them at build time" OFF)
 set (PBRT_OPTIX7_PATH $ENV{PBRT_OPTIX7_PATH} CACHE PATH "Path to OptiX 7 SDK")
 set (PBRT_GPU_SHADER_MODEL "" CACHE STRING "")
+
+
 
 if (NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
   message (STATUS "Setting build type to 'Release' as none was specified.")
@@ -57,12 +63,12 @@ function (CHECK_EXT NAME DIR HASH)
   endif (GIT_FOUND)
 endfunction ()
 
-check_ext ("OpenEXR" "openexr/OpenEXR" 5cfb5dab6dfada731586b0281bdb15ee75e26782)
+check_ext ("OpenEXR" "openexr/src" f723c3940fff287c0a26b425b90a8e764823bfd4)
 check_ext ("OpenVDB" "openvdb/nanovdb" 414bed84c2fc22e188eac7b611aa85c7edd7a5a9)
-check_ext ("Ptex" "ptex/src" 4cd8e9a6db2b06e478dfbbd8c26eb6df97f84483)
+check_ext ("Ptex" "ptex/src" 054047d02b9e06e690420b407114d2872435b953)
 check_ext ("double-conversion" "double-conversion/cmake" cc1f75a114aca8d2af69f73a5a959aecbab0e87a)
 check_ext ("filesystem" "filesystem/filesystem" c5f9de30142453eb3c6fe991e82dfc2583373116)
-check_ext ("glfw" "glfw/docs" 4cb36872a5fe448c205d0b46f0e8c8b57530cfe0)
+check_ext ("glfw" "glfw/docs" 7b6aead9fb88b3623e3b3725ebb42670cbe4c579)
 check_ext ("libdeflate" "libdeflate/common" 1fd0bea6ca2073c68493632dafc4b1ddda1bcbc3)
 check_ext ("lodepng" "lodepng/examples" 8c6a9e30576f07bf470ad6f09458a2dcd7a6a84a)
 check_ext ("qoi" "qoi" 028c75fd26e5e0758c7c711216c00404994c1ad3)
@@ -99,6 +105,17 @@ set (BUILD_SHARED_LIBS OFF)
 
 add_subdirectory (${CMAKE_CURRENT_SOURCE_DIR}/src/ext)
 
+find_package(OpenEXR 3.1.1)
+
+if (OPENEXR_FOUND)
+  message (STATUS "Found OpenEXR version ${OPENEXR_VERSION}")
+else ()
+  message (STATUS "OpenEXR not found; building it from scratch.")
+  add_subdirectory (src/ext/openexr)
+  set_property (TARGET IlmThread Iex OpenEXR
+                PROPERTY FOLDER "ext/OpenEXR")
+endif ()
+
 ########################################
 # os/compiler-specific stuff
 
@@ -114,13 +131,20 @@ elseif (CMAKE_SYSTEM_NAME STREQUAL Linux)
 else ()
   message (SEND_ERROR "Unknown system name: " + CMAKE_SYSTEM_NAME)
 endif()
-
+if (CMAKE_SYSTEM_NAME STREQUAL Darwin)
+  add_definitions(-Wno-deprecated-declarations) # silent deprecated 'snprintf' message under MacOS arm64
+endif()
 # libgoogle-perftools-dev
 find_library (PROFILE_LIB profiler)
 if (NOT PROFILE_LIB)
   message (STATUS "Unable to find -lprofiler")
 else ()
   message (STATUS "Found -lprofiler: ${PROFILE_LIB}")
+endif ()
+
+if (CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND CMAKE_CXX_COMPILER_VERSION GREATER_EQUAL 14)
+  message (STATUS "Disabling -ffp-contract (thanks, clang 14!)")
+  list (APPEND PBRT_CXX_FLAGS "-ffp-contract=off")
 endif ()
 
 add_library (pbrt_warnings INTERFACE)
@@ -136,6 +160,7 @@ target_compile_options (
         "$<$<CXX_COMPILER_ID:MSVC>:$<$<COMPILE_LANGUAGE:CUDA>:SHELL:-Xcompiler >/wd26451>" # arithmetic on 4-byte value, then cast to 8-byte
         "$<$<CXX_COMPILER_ID:MSVC>:$<$<COMPILE_LANGUAGE:CUDA>:SHELL:-Xcompiler >/wd26495>" # uninitialized member variable
         "$<$<CXX_COMPILER_ID:MSVC>:$<$<COMPILE_LANGUAGE:CUDA>:SHELL:-Xcompiler >/wd4334>" # 32 to 64 bit displacement
+        "$<$<CXX_COMPILER_ID:MSVC>:$<$<COMPILE_LANGUAGE:CUDA>:SHELL:-Xcompiler >/wd4146>" # NanoVDB: unary minus operator applied to unsigned type, result still unsigned
 )
 
 add_library (pbrt_opt INTERFACE)
@@ -227,10 +252,10 @@ of CUDA installed, please update your PATH.")
             # Get CUDA compute capability
             set (CHECK_CUDA_OUTPUT_EXE ${CMAKE_BINARY_DIR}/checkcuda)
             if (MSVC)
-                execute_process (COMMAND ${CMAKE_CUDA_COMPILER} -lcuda ${CMAKE_SOURCE_DIR}/cmake/checkcuda.cu -ccbin ${CMAKE_CXX_COMPILER} -o ${CHECK_CUDA_OUTPUT_EXE}
+                execute_process (COMMAND ${CMAKE_CUDA_COMPILER} -lcuda ${PBRT_SOURCE_CODE}/cmake/checkcuda.cu -ccbin ${CMAKE_CXX_COMPILER} -o ${CHECK_CUDA_OUTPUT_EXE}
                                  RESULT_VARIABLE BUILD_CHECK_CUDA_RETURN_CODE)
             else  ()
-                execute_process (COMMAND ${CMAKE_CUDA_COMPILER} -lcuda ${CMAKE_SOURCE_DIR}/cmake/checkcuda.cu -o ${CHECK_CUDA_OUTPUT_EXE}
+                execute_process (COMMAND ${CMAKE_CUDA_COMPILER} -lcuda ${PBRT_SOURCE_CODE}/cmake/checkcuda.cu -o ${CHECK_CUDA_OUTPUT_EXE}
                                  RESULT_VARIABLE BUILD_CHECK_CUDA_RETURN_CODE)
             endif ()
 
@@ -531,6 +556,10 @@ set (PBRT_SOURCE
 
   src/pbrt/cmd/pspec_gpu.cpp
   )
+  
+if (MSVC)
+    set (PBRT_SOURCE ${PBRT_SOURCE} src/pbrt/visualstudio.natvis)
+endif ()
 
 set (PBRT_SOURCE_HEADERS
   src/pbrt/bsdf.h
@@ -676,17 +705,17 @@ SET (PBRT_UTIL_SOURCE_HEADERS
 
 if (PBRT_CUDA_ENABLED)
   set (PBRT_GPU_SOURCE
-    src/pbrt/gpu/aggregate.cpp
-    src/pbrt/gpu/denoiser.cpp
+    src/pbrt/gpu/optix/aggregate.cpp
+    src/pbrt/gpu/optix/denoiser.cpp
     src/pbrt/gpu/memory.cpp
     src/pbrt/gpu/util.cpp
   )
   set (PBRT_GPU_SOURCE_HEADERS
-    src/pbrt/gpu/aggregate.h
+    src/pbrt/gpu/optix/aggregate.h
     src/pbrt/gpu/cudagl.h
-    src/pbrt/gpu/denoiser.h
+    src/pbrt/gpu/optix/denoiser.h
     src/pbrt/gpu/memory.h
-    src/pbrt/gpu/optix.h
+    src/pbrt/gpu/optix/optix.h
     src/pbrt/gpu/util.h
   )
 
@@ -752,7 +781,7 @@ if (PBRT_CUDA_ENABLED)
     PROPERTIES LANGUAGE CUDA
   )
 
-  cuda_compile_and_embed (PBRT_EMBEDDED_PTX src/pbrt/gpu/optix.cu optix.cu)
+  cuda_compile_and_embed (PBRT_EMBEDDED_PTX src/pbrt/gpu/optix/optix.cu optix.cu)
 endif ()
 
 source_group ("Source Files" FILES ${PBRT_SOURCE})
@@ -786,13 +815,13 @@ target_link_libraries (soac PRIVATE pbrt_warnings pbrt_opt)
 set_target_properties (soac PROPERTIES OUTPUT_NAME soac)
 
 add_custom_command (OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/pbrt_soa.h
-    COMMAND soac ${CMAKE_SOURCE_DIR}/src/pbrt/pbrt.soa > ${CMAKE_CURRENT_BINARY_DIR}/pbrt_soa.h
-    DEPENDS soac ${CMAKE_SOURCE_DIR}/src/pbrt/pbrt.soa)
+    COMMAND soac ${PBRT_SOURCE_CODE}/src/pbrt/pbrt.soa > ${CMAKE_CURRENT_BINARY_DIR}/pbrt_soa.h
+    DEPENDS soac ${PBRT_SOURCE_CODE}/src/pbrt/pbrt.soa)
 set (PBRT_SOA_GENERATED ${CMAKE_CURRENT_BINARY_DIR}/pbrt_soa.h)
 
 add_custom_command (OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/wavefront_workitems_soa.h
-    COMMAND soac ${CMAKE_SOURCE_DIR}/src/pbrt/wavefront/workitems.soa > ${CMAKE_CURRENT_BINARY_DIR}/wavefront_workitems_soa.h
-    DEPENDS soac ${CMAKE_SOURCE_DIR}/src/pbrt/wavefront/workitems.soa)
+    COMMAND soac ${PBRT_SOURCE_CODE}/src/pbrt/wavefront/workitems.soa > ${CMAKE_CURRENT_BINARY_DIR}/wavefront_workitems_soa.h
+    DEPENDS soac ${PBRT_SOURCE_CODE}/src/pbrt/wavefront/workitems.soa)
 set (PBRT_SOA_GENERATED ${PBRT_SOA_GENERATED} ${CMAKE_CURRENT_BINARY_DIR}/wavefront_workitems_soa.h)
 
 add_custom_target (pbrt_soa_generated DEPENDS ${PBRT_SOA_GENERATED})
@@ -839,7 +868,6 @@ target_include_directories (pbrt_lib PUBLIC
   src/ext
   ${STB_INCLUDE}
   ${QOI_INCLUDE}
-  ${OPENEXR_INCLUDE}
   ${ZLIB_INCLUDE_DIRS}
   ${LIBDEFLATE_INCLUDE_DIRS}
   ${FILESYSTEM_INCLUDE}
@@ -857,7 +885,7 @@ endif ()
 
 target_compile_options (pbrt_lib PUBLIC ${PBRT_CXX_FLAGS})
 
-target_link_libraries (pbrt_lib PRIVATE pbrt_warnings pbrt_opt $<$<BOOL:PBRT_CUDA_ENABLED>:cuda_build_configuration>)
+target_link_libraries (pbrt_lib PRIVATE OpenEXR::OpenEXR pbrt_warnings pbrt_opt $<$<BOOL:PBRT_CUDA_ENABLED>:cuda_build_configuration>)
 
 add_sanitizers (pbrt_lib)
 
@@ -869,7 +897,7 @@ endif()
 set (ALL_PBRT_LIBS
   pbrt_lib
   ${CMAKE_THREAD_LIBS_INIT}
-  ${OPENEXR_LIBS}
+  OpenEXR::OpenEXR
   Ptex_static
   ${ZLIB_LIBRARIES}
   ${LIBDEFLATE_LIBRARIES}
@@ -996,6 +1024,34 @@ set_target_properties (plytool PROPERTIES OUTPUT_NAME plytool)
 add_sanitizers (plytool)
 
 set_property (TARGET plytool PROPERTY FOLDER "cmd")
+
+######################
+# nanovdb2pbrt
+
+add_executable (nanovdb2pbrt src/pbrt/cmd/nanovdb2pbrt.cpp)
+add_executable (pbrt::nanovdb2pbrt ALIAS nanovdb2pbrt)
+
+target_compile_definitions (nanovdb2pbrt PRIVATE ${PBRT_DEFINITIONS})
+target_compile_options (nanovdb2pbrt PUBLIC ${PBRT_CXX_FLAGS})
+target_include_directories (nanovdb2pbrt PUBLIC src src/ext)
+target_link_libraries (nanovdb2pbrt PRIVATE ${ALL_PBRT_LIBS} pbrt_warnings pbrt_opt)
+
+set_target_properties (nanovdb2pbrt PROPERTIES OUTPUT_NAME nanovdb2pbrt)
+
+add_sanitizers (nanovdb2pbrt)
+
+set_property (TARGET nanovdb2pbrt PROPERTY FOLDER "cmd")
+
+# Only do this if both targets actually exist
+if (TARGET Ptex_static AND TARGET zlibstatic)
+  install(
+    TARGETS zlibstatic
+    EXPORT Ptex             # Same export set name as used by Ptex
+    RUNTIME DESTINATION bin
+    LIBRARY DESTINATION lib
+    ARCHIVE DESTINATION lib
+  )
+endif()
 
 ######################
 # cyhair2pbrt

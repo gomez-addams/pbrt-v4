@@ -23,23 +23,18 @@ jobs:
 
     steps:
     - name: Checkout pbrt
-      uses: actions/checkout@v2
+      uses: actions/checkout@v4
       with:
         submodules: true
 
     - name: Checkout rgb2spectrum tables
-      uses: actions/checkout@v2
+      uses: actions/checkout@v4
       with:
         repository: mmp/rgb2spectrum
         path: build
       
     - name: Get cmake
       uses: lukka/get-cmake@latest
-
-    - name: Install OpenEXR
-      env:
-          HOMEBREW_NO_INSTALL_CLEANUP: 1
-      run: brew install openexr
 
     - name: Configure
       run: |

@@ -19,6 +19,7 @@
 #include <pbrt/util/colorspace.h>
 #include <pbrt/util/error.h>
 #include <pbrt/util/file.h>
+#include <pbrt/util/gui.h>
 #include <pbrt/util/image.h>
 #include <pbrt/util/lowdiscrepancy.h>
 #include <pbrt/util/memory.h>
@@ -33,7 +34,7 @@
 
 namespace pbrt {
 
-void Film::AddSplat(Point2f p, SampledSpectrum v, const SampledWavelengths &lambda) {
+PBRT_CPU_GPU void Film::AddSplat(Point2f p, SampledSpectrum v, const SampledWavelengths &lambda) {
     auto splat = [&](auto ptr) { return ptr->AddSplat(p, v, lambda); };
     return Dispatch(splat);
 }
@@ -78,8 +79,16 @@ FilmBaseParameters::FilmBaseParameters(const ParameterDictionary &parameters,
     } else if (filename.empty())
         filename = "pbrt.exr";
 
-    fullResolution = Point2i(parameters.GetOneInt("xresolution", 1280),
-                             parameters.GetOneInt("yresolution", 720));
+    if (Options->fullscreen) {
+        fullResolution = GUI::GetResolution();
+
+        // Omit unused parameter error
+        auto unusedX = parameters.GetOneInt("xresolution", 1280);
+        auto unusedY = parameters.GetOneInt("yresolution", 720);
+    } else {
+        fullResolution = Point2i(parameters.GetOneInt("xresolution", 1280),
+                                 parameters.GetOneInt("yresolution", 720));
+    }
     if (Options->quickRender) {
         fullResolution.x = std::max(1, fullResolution.x / 4);
         fullResolution.y = std::max(1, fullResolution.y / 4);
@@ -166,7 +175,7 @@ FilmBaseParameters::FilmBaseParameters(const ParameterDictionary &parameters,
 }
 
 // FilmBase Method Definitions
-Bounds2f FilmBase::SampleBounds() const {
+PBRT_CPU_GPU Bounds2f FilmBase::SampleBounds() const {
     Vector2f radius = filter.Radius();
     return Bounds2f(pixelBounds.pMin - radius + Vector2f(0.5f, 0.5f),
                     pixelBounds.pMax + radius - Vector2f(0.5f, 0.5f));
@@ -179,7 +188,7 @@ std::string FilmBase::BaseToString() const {
 }
 
 // VisibleSurface Method Definitions
-VisibleSurface::VisibleSurface(const SurfaceInteraction &si, SampledSpectrum albedo,
+PBRT_CPU_GPU VisibleSurface::VisibleSurface(const SurfaceInteraction &si, SampledSpectrum albedo,
                                const SampledWavelengths &lambda)
     : albedo(albedo) {
     set = true;
@@ -487,7 +496,7 @@ RGBFilm::RGBFilm(FilmBaseParameters p, const RGBColorSpace *colorSpace,
     outputRGBFromSensorRGB = colorSpace->RGBFromXYZ * sensor->XYZFromSensorRGB;
 }
 
-void RGBFilm::AddSplat(Point2f p, SampledSpectrum L, const SampledWavelengths &lambda) {
+PBRT_CPU_GPU void RGBFilm::AddSplat(Point2f p, SampledSpectrum L, const SampledWavelengths &lambda) {
     CHECK(!L.HasNaNs());
     // Convert sample radiance to _PixelSensor_ RGB
     RGB rgb = sensor->ToSensorRGB(L, lambda);
@@ -576,7 +585,7 @@ RGBFilm *RGBFilm::Create(const ParameterDictionary &parameters, Float exposureTi
 }
 
 // GBufferFilm Method Definitions
-void GBufferFilm::AddSample(Point2i pFilm, SampledSpectrum L,
+PBRT_CPU_GPU void GBufferFilm::AddSample(Point2i pFilm, SampledSpectrum L,
                             const SampledWavelengths &lambda,
                             const VisibleSurface *visibleSurface, Float weight) {
     RGB rgb = sensor->ToSensorRGB(L, lambda);
@@ -647,7 +656,7 @@ GBufferFilm::GBufferFilm(FilmBaseParameters p, const AnimatedTransform &outputFr
     outputRGBFromSensorRGB = colorSpace->RGBFromXYZ * sensor->XYZFromSensorRGB;
 }
 
-void GBufferFilm::AddSplat(Point2f p, SampledSpectrum v,
+PBRT_CPU_GPU void GBufferFilm::AddSplat(Point2f p, SampledSpectrum v,
                            const SampledWavelengths &lambda) {
     // NOTE: same code as RGBFilm::AddSplat()...
     CHECK(!v.HasNaNs());
@@ -687,17 +696,17 @@ Image GBufferFilm::GetImage(ImageMetadata *metadata, Float splatScale) {
                  "Albedo.R",
                  "Albedo.G",
                  "Albedo.B",
-                 "Px",
-                 "Py",
-                 "Pz",
+                 "P.X",
+                 "P.Y",
+                 "P.Z",
                  "dzdx",
                  "dzdy",
-                 "Nx",
-                 "Ny",
-                 "Nz",
-                 "Nsx",
-                 "Nsy",
-                 "Nsz",
+                 "N.X",
+                 "N.Y",
+                 "N.Z",
+                 "Ns.X",
+                 "Ns.Y",
+                 "Ns.Z",
                  "u",
                  "v",
                  "Variance.R",
@@ -708,10 +717,10 @@ Image GBufferFilm::GetImage(ImageMetadata *metadata, Float splatScale) {
                  "RelativeVariance.B"});
 
     ImageChannelDesc rgbDesc = image.GetChannelDesc({"R", "G", "B"});
-    ImageChannelDesc pDesc = image.GetChannelDesc({"Px", "Py", "Pz"});
+    ImageChannelDesc pDesc = image.GetChannelDesc({"P.X", "P.Y", "P.Z"});
     ImageChannelDesc dzDesc = image.GetChannelDesc({"dzdx", "dzdy"});
-    ImageChannelDesc nDesc = image.GetChannelDesc({"Nx", "Ny", "Nz"});
-    ImageChannelDesc nsDesc = image.GetChannelDesc({"Nsx", "Nsy", "Nsz"});
+    ImageChannelDesc nDesc = image.GetChannelDesc({"N.X", "N.Y", "N.Z"});
+    ImageChannelDesc nsDesc = image.GetChannelDesc({"Ns.X", "Ns.Y", "Ns.Z"});
     ImageChannelDesc uvDesc = image.GetChannelDesc({"u", "v"});
     ImageChannelDesc albedoRgbDesc =
         image.GetChannelDesc({"Albedo.R", "Albedo.G", "Albedo.B"});
@@ -873,11 +882,11 @@ SpectralFilm::SpectralFilm(FilmBaseParameters p, Float lambdaMin, Float lambdaMa
         pixel.weightSums = bucketWeightBuffer;
         bucketWeightBuffer += nBuckets;
         pixel.bucketSplats = splatBuffer;
-        splatBuffer += NSpectrumSamples;
+        splatBuffer += nBuckets;
     }
 }
 
-RGB SpectralFilm::GetPixelRGB(Point2i p, Float splatScale) const {
+PBRT_CPU_GPU RGB SpectralFilm::GetPixelRGB(Point2i p, Float splatScale) const {
     // Note: this is effectively the same as RGBFilm::GetPixelRGB
 
     const Pixel &pixel = pixels[p];
@@ -897,7 +906,7 @@ RGB SpectralFilm::GetPixelRGB(Point2i p, Float splatScale) const {
     return rgb;
 }
 
-void SpectralFilm::AddSplat(Point2f p, SampledSpectrum L,
+PBRT_CPU_GPU void SpectralFilm::AddSplat(Point2f p, SampledSpectrum L,
                             const SampledWavelengths &lambda) {
     // This, too, is similar to RGBFilm::AddSplat(), with additions for
     // spectra.
@@ -1041,6 +1050,13 @@ SpectralFilm *SpectralFilm::Create(const ParameterDictionary &parameters,
     int nBuckets = parameters.GetOneInt("nbuckets", 16);
     Float lambdaMin = parameters.GetOneFloat("lambdamin", Lambda_min);
     Float lambdaMax = parameters.GetOneFloat("lambdamax", Lambda_max);
+    if (lambdaMin < Lambda_min || lambdaMax > Lambda_max)
+        ErrorExit("Unfortunately pbrt must be recompiled to render wavelengths "
+                  "beyond the [%f,%f] range ([%f,%f] was specified). Please "
+                  "update Lambda_min and/or Lambda_max as necessary in "
+                  "src/pbrt/util/spectrum.h and recompile.", Lambda_min, Lambda_max,
+                  lambdaMin, lambdaMax);
+
     Float maxComponentValue = parameters.GetOneFloat("maxcomponentvalue", Infinity);
 
     return alloc.new_object<SpectralFilm>(filmBaseParameters, lambdaMin, lambdaMax,

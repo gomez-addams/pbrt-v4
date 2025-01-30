@@ -313,7 +313,7 @@ class Sphere {
         }
 
         // Sample sphere uniformly inside subtended cone
-        // Compute quantities related the $\theta_\roman{max}$ for cone
+        // Compute quantities related to the $\theta_\roman{max}$ for cone
         Float sinThetaMax = radius / Distance(ctx.p(), pCenter);
         Float sin2ThetaMax = Sqr(sinThetaMax);
         Float cosThetaMax = SafeSqrt(1 - sin2ThetaMax);
@@ -511,6 +511,7 @@ class Disk {
         Point3f pObj(pd.x * radius, pd.y * radius, height);
         Point3fi pi = (*renderFromObject)(Point3fi(pObj));
         Normal3f n = Normalize((*renderFromObject)(Normal3f(0, 0, 1)));
+
         if (reverseOrientation)
             n *= -1;
         // Compute $(u,v)$ for sampled point on disk
@@ -1079,7 +1080,7 @@ class Triangle {
         // Apply warp product sampling for cosine factor at reference point
         Float pdf = 1;
         if (ctx.ns != Normal3f(0, 0, 0)) {
-            // Compute $\cos \theta$-based weights _w_ at sample domain corners
+            // Compute $\cos\theta$-based weights _w_ at sample domain corners
             Point3f rp = ctx.p();
             Vector3f wi[3] = {Normalize(p0 - rp), Normalize(p1 - rp), Normalize(p2 - rp)};
             pstd::array<Float, 4> w =
@@ -1104,7 +1105,7 @@ class Triangle {
         Point3f pAbsSum = Abs(b[0] * p0) + Abs(b[1] * p1) + Abs((1 - b[0] - b[1]) * p2);
         Vector3f pError = Vector3f(gamma(6) * pAbsSum);
 
-        // Return _ShapeSample_ for uniform solid angle sampled point on triangle
+        // Return _ShapeSample_ for solid angle sampled point on triangle
         Point3f p = b[0] * p0 + b[1] * p1 + b[2] * p2;
         // Compute surface normal for sampled point on triangle
         Normal3f n = Normalize(Normal3f(Cross(p1 - p0, p2 - p0)));
@@ -1149,7 +1150,7 @@ class Triangle {
         }
 
         Float pdf = 1 / solidAngle;
-        // Adjust PDF for warp product sampling of triangle $\cos \theta$ factor
+        // Adjust PDF for warp product sampling of triangle $\cos\theta$ factor
         if (ctx.ns != Normal3f(0, 0, 0)) {
             // Get triangle vertices in _p0_, _p1_, and _p2_
             const TriangleMesh *mesh = GetMesh();
@@ -1157,7 +1158,7 @@ class Triangle {
             Point3f p0 = mesh->p[v[0]], p1 = mesh->p[v[1]], p2 = mesh->p[v[2]];
 
             Point2f u = InvertSphericalTriangleSample({p0, p1, p2}, ctx.p(), wi);
-            // Compute $\cos \theta$-based weights _w_ at sample domain corners
+            // Compute $\cos\theta$-based weights _w_ at sample domain corners
             Point3f rp = ctx.p();
             Vector3f wi[3] = {Normalize(p0 - rp), Normalize(p1 - rp), Normalize(p2 - rp)};
             pstd::array<Float, 4> w =
@@ -1289,7 +1290,7 @@ PBRT_CPU_GPU inline pstd::optional<BilinearIntersection> IntersectBilinearPatch(
 
     // Find epsilon _eps_ to ensure that candidate $t$ is greater than zero
     Float eps =
-        gamma(10) * (MaxComponentValue(Abs(ray.o)) + MaxComponentValue(Abs(ray.d)) +
+        gamma(30) * (MaxComponentValue(Abs(ray.o)) + MaxComponentValue(Abs(ray.d)) +
                      MaxComponentValue(Abs(p00)) + MaxComponentValue(Abs(p10)) +
                      MaxComponentValue(Abs(p01)) + MaxComponentValue(Abs(p11)));
 
@@ -1537,49 +1538,49 @@ class BilinearPatch {
     static constexpr Float MinSphericalSampleArea = 1e-4;
 };
 
-inline Bounds3f Shape::Bounds() const {
+PBRT_CPU_GPU inline Bounds3f Shape::Bounds() const {
     auto bounds = [&](auto ptr) { return ptr->Bounds(); };
     return Dispatch(bounds);
 }
 
-inline pstd::optional<ShapeIntersection> Shape::Intersect(const Ray &ray,
+PBRT_CPU_GPU inline pstd::optional<ShapeIntersection> Shape::Intersect(const Ray &ray,
                                                           Float tMax) const {
     auto intr = [&](auto ptr) { return ptr->Intersect(ray, tMax); };
     return Dispatch(intr);
 }
 
-inline bool Shape::IntersectP(const Ray &ray, Float tMax) const {
+PBRT_CPU_GPU inline bool Shape::IntersectP(const Ray &ray, Float tMax) const {
     auto intr = [&](auto ptr) { return ptr->IntersectP(ray, tMax); };
     return Dispatch(intr);
 }
 
-inline Float Shape::Area() const {
+PBRT_CPU_GPU inline Float Shape::Area() const {
     auto area = [&](auto ptr) { return ptr->Area(); };
     return Dispatch(area);
 }
 
-inline pstd::optional<ShapeSample> Shape::Sample(Point2f u) const {
+PBRT_CPU_GPU inline pstd::optional<ShapeSample> Shape::Sample(Point2f u) const {
     auto sample = [&](auto ptr) { return ptr->Sample(u); };
     return Dispatch(sample);
 }
 
-inline Float Shape::PDF(const Interaction &in) const {
+PBRT_CPU_GPU inline Float Shape::PDF(const Interaction &in) const {
     auto pdf = [&](auto ptr) { return ptr->PDF(in); };
     return Dispatch(pdf);
 }
 
-inline pstd::optional<ShapeSample> Shape::Sample(const ShapeSampleContext &ctx,
+PBRT_CPU_GPU inline pstd::optional<ShapeSample> Shape::Sample(const ShapeSampleContext &ctx,
                                                  Point2f u) const {
     auto sample = [&](auto ptr) { return ptr->Sample(ctx, u); };
     return Dispatch(sample);
 }
 
-inline Float Shape::PDF(const ShapeSampleContext &ctx, Vector3f wi) const {
+PBRT_CPU_GPU inline Float Shape::PDF(const ShapeSampleContext &ctx, Vector3f wi) const {
     auto pdf = [&](auto ptr) { return ptr->PDF(ctx, wi); };
     return Dispatch(pdf);
 }
 
-inline DirectionCone Shape::NormalBounds() const {
+PBRT_CPU_GPU inline DirectionCone Shape::NormalBounds() const {
     auto nb = [&](auto ptr) { return ptr->NormalBounds(); };
     return Dispatch(nb);
 }

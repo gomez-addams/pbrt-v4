@@ -47,6 +47,12 @@ PBRT_CPU_GPU inline bool Refract(Vector3f wi, Normal3f n, Float eta, Float *etap
 }
 
 PBRT_CPU_GPU inline Float HenyeyGreenstein(Float cosTheta, Float g) {
+    // The Henyey-Greenstein phase function isn't suitable for |g| \approx
+    // 1 so we clamp it before it becomes numerically instable. (It's an
+    // analogous situation to BSDFs: if the BSDF is perfectly specular, one
+    // should use one based on a Dirac delta distribution rather than a
+    // very smooth microfacet distribution...)
+    g = Clamp(g, -.99, .99);
     Float denom = 1 + Sqr(g) + 2 * g * cosTheta;
     return Inv4Pi * (1 - Sqr(g)) / (denom * SafeSqrt(denom));
 }
@@ -182,6 +188,11 @@ class TrowbridgeReitzDistribution {
 
     std::string ToString() const;
 
+    // Note that this should probably instead be "return Sqr(roughness)" to
+    // be more perceptually uniform, though this wasn't noticed until some
+    // time after pbrt-v4 shipped: https://github.com/mmp/pbrt-v4/issues/479.
+    // therefore, we will leave it as is so that the rendered results with
+    // existing pbrt-v4 scenes doesn't change unexpectedly.
     PBRT_CPU_GPU
     static Float RoughnessToAlpha(Float roughness) { return std::sqrt(roughness); }
 

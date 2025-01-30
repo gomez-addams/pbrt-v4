@@ -252,7 +252,7 @@ ConductorMaterial *ConductorMaterial::Create(const TextureParameterDictionary &p
 
 // CoatedDiffuseMaterial Method Definitions
 template <typename TextureEvaluator>
-CoatedDiffuseBxDF CoatedDiffuseMaterial::GetBxDF(TextureEvaluator texEval,
+PBRT_CPU_GPU CoatedDiffuseBxDF CoatedDiffuseMaterial::GetBxDF(TextureEvaluator texEval,
                                                  const MaterialEvalContext &ctx,
                                                  SampledWavelengths &lambda) const {
     // Initialize diffuse component of plastic material
@@ -283,10 +283,10 @@ CoatedDiffuseBxDF CoatedDiffuseMaterial::GetBxDF(TextureEvaluator texEval,
 }
 
 // Explicit template instantiation
-template CoatedDiffuseBxDF CoatedDiffuseMaterial::GetBxDF(
+template PBRT_CPU_GPU CoatedDiffuseBxDF CoatedDiffuseMaterial::GetBxDF(
     BasicTextureEvaluator, const MaterialEvalContext &ctx,
     SampledWavelengths &lambda) const;
-template CoatedDiffuseBxDF CoatedDiffuseMaterial::GetBxDF(
+template PBRT_CPU_GPU CoatedDiffuseBxDF CoatedDiffuseMaterial::GetBxDF(
     UniversalTextureEvaluator, const MaterialEvalContext &ctx,
     SampledWavelengths &lambda) const;
 
@@ -343,7 +343,7 @@ CoatedDiffuseMaterial *CoatedDiffuseMaterial::Create(
 }
 
 template <typename TextureEvaluator>
-CoatedConductorBxDF CoatedConductorMaterial::GetBxDF(TextureEvaluator texEval,
+PBRT_CPU_GPU CoatedConductorBxDF CoatedConductorMaterial::GetBxDF(TextureEvaluator texEval,
                                                      const MaterialEvalContext &ctx,
                                                      SampledWavelengths &lambda) const {
     Float iurough = texEval(interfaceURoughness, ctx);
@@ -367,11 +367,13 @@ CoatedConductorBxDF CoatedConductorMaterial::GetBxDF(TextureEvaluator texEval,
         ce = texEval(conductorEta, ctx, lambda);
         ck = texEval(k, ctx, lambda);
     } else {
-        // Avoid r==0 NaN case...
+        // Avoid r==1 NaN case...
         SampledSpectrum r = Clamp(texEval(reflectance, ctx, lambda), 0, .9999);
         ce = SampledSpectrum(1.f);
         ck = 2 * Sqrt(r) / Sqrt(ClampZero(SampledSpectrum(1) - r));
     }
+    ce /= ieta;
+    ck /= ieta;
 
     Float curough = texEval(conductorURoughness, ctx);
     Float cvrough = texEval(conductorVRoughness, ctx);
@@ -389,10 +391,10 @@ CoatedConductorBxDF CoatedConductorMaterial::GetBxDF(TextureEvaluator texEval,
                                maxDepth, nSamples);
 }
 
-template CoatedConductorBxDF CoatedConductorMaterial::GetBxDF(
+template PBRT_CPU_GPU CoatedConductorBxDF CoatedConductorMaterial::GetBxDF(
     BasicTextureEvaluator, const MaterialEvalContext &ctx,
     SampledWavelengths &lambda) const;
-template CoatedConductorBxDF CoatedConductorMaterial::GetBxDF(
+template PBRT_CPU_GPU CoatedConductorBxDF CoatedConductorMaterial::GetBxDF(
     UniversalTextureEvaluator, const MaterialEvalContext &ctx,
     SampledWavelengths &lambda) const;
 
@@ -489,7 +491,7 @@ std::string SubsurfaceMaterial::ToString() const {
     return StringPrintf("[ SubsurfaceMaterial displacement: %s normalMap: %s scale: %f "
                         "sigma_a: %s sigma_s: %s reflectance: %s mfp: %s uRoughness: %s "
                         "vRoughness: %s scale: %f eta: %f remapRoughness: %s ]",
-                        displacement, scale, sigma_a, sigma_s, reflectance, mfp,
+                        displacement, normalMap, scale, sigma_a, sigma_s, reflectance, mfp,
                         uRoughness, vRoughness, scale, eta, remapRoughness);
 }
 

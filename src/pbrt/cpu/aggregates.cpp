@@ -177,6 +177,7 @@ BVHAggregate::BVHAggregate(std::vector<Primitive> prims, int maxPrimsInNode,
 
     // Convert BVH into compact representation in _nodes_ array
     bvhPrimitives.resize(0);
+    bvhPrimitives.shrink_to_fit();
     LOG_VERBOSE("BVH created with %d nodes for %d primitives (%.2f MB)",
                 totalNodes.load(), (int)primitives.size(),
                 float(totalNodes.load() * sizeof(LinearBVHNode)) / (1024.f * 1024.f));
@@ -290,7 +291,7 @@ BVHBuildNode *BVHAggregate::buildRecursive(ThreadLocal<Allocator> &threadAllocat
 
                     // Compute costs for splitting after each bucket
                     constexpr int nSplits = nBuckets - 1;
-                    float costs[nSplits] = {};
+                    Float costs[nSplits] = {};
                     // Partially initialize _costs_ using a forward scan over splits
                     int countBelow = 0;
                     Bounds3f boundBelow;
@@ -300,7 +301,7 @@ BVHBuildNode *BVHAggregate::buildRecursive(ThreadLocal<Allocator> &threadAllocat
                         costs[i] += countBelow * boundBelow.SurfaceArea();
                     }
 
-                    // Finish initializing _costs_ using a backwards scan over splits
+                    // Finish initializing _costs_ using a backward scan over splits
                     int countAbove = 0;
                     Bounds3f boundAbove;
                     for (int i = nSplits; i >= 1; --i) {
